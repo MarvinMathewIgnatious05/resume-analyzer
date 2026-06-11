@@ -1,0 +1,59 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi-service
+spec:
+  ports:
+    - port: 8080
+      targetPort: 8080
+  selector:
+    app: fastapi-service
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: fastapi-service
+  template:
+    metadata:
+      labels:
+        app: fastapi-service
+    spec:
+      containers:
+        - name: fastapi
+          image: resume-analyzer-fastapi:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: OLLAMA_HOST
+              value: http://ollama-service:11434
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "2000m"
+              memory: "1024Mi"
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fastapi-service-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fastapi-service
+  minReplicas: 2
+  maxReplicas: 8
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 80

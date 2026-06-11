@@ -1,0 +1,129 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: resume_analyzer_db
+    environment:
+      POSTGRES_DB: resume_analyzer
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: marvin@123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d resume_analyzer"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: resume_analyzer_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: resume_analyzer/Dockerfile
+    container_name: resume_analyzer_web
+    command: gunicorn resume_analyzer.wsgi:application --bind 0.0.0.0:8000 --workers 3
+    volumes:
+      - ./resume_analyzer:/app
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    environment:
+      - DB_NAME=resume_analyzer
+      - DB_USER=postgres
+      - DB_PASSWORD=marvin@123
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+      - FASTAPI_SERVICE_URL=http://fastapi:8080
+      - DEBUG=False
+      - SECRET_KEY=django-insecure-prod-env-key-please-replace-in-k8s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: resume_analyzer/Dockerfile
+    container_name: resume_analyzer_celery
+    command: celery -A resume_analyzer worker --loglevel=info
+    volumes:
+      - ./resume_analyzer:/app
+      - media_volume:/app/media
+    environment:
+      - DB_NAME=resume_analyzer
+      - DB_USER=postgres
+      - DB_PASSWORD=marvin@123
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://redis:6379/0
+      - FASTAPI_SERVICE_URL=http://fastapi:8080
+      - DEBUG=False
+      - SECRET_KEY=django-insecure-prod-env-key-please-replace-in-k8s
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+
+  fastapi:
+    build:
+      context: .
+      dockerfile: fastapi_service/Dockerfile
+    container_name: resume_analyzer_fastapi
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8080
+    volumes:
+      - ./fastapi_service:/app
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+    ports:
+      - "8080:8080"
+    restart: always
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: resume_analyzer_ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: always
+
+  nginx:
+    image: nginx:alpine
+    container_name: resume_analyzer_proxy
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - static_volume:/app/staticfiles
+      - media_volume:/app/media
+    depends_on:
+      - web
+      - fastapi
+    restart: always
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
+  static_volume:
+  media_volume:
