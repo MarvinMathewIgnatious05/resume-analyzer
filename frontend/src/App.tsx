@@ -1,12 +1,12 @@
 import { BrowserRouter as Router, Routes, Route, Navigate, Link } from 'react-router-dom';
 import { useAppSelector, useAppDispatch } from './store/store';
 import { logout } from './store/authSlice';
-import { LogOut, LayoutDashboard, FileText, CheckSquare, ShieldCheck, User as UserIcon } from 'lucide-react';
+import { LogOut, LayoutDashboard, CheckSquare, Sparkles, User as UserIcon } from 'lucide-react';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import ResumeDetail from './pages/ResumeDetail';
 import JobMatcher from './pages/JobMatcher';
-import AdminDashboard from './pages/AdminDashboard';
+import CoverLetterGenerator from './pages/CoverLetterGenerator';
 
 // Custom Route Guard
 const PrivateRoute = ({ children }: { children: React.ReactNode }) => {
@@ -33,8 +33,8 @@ const Navigation = () => {
             <Link to="/job-match" className="flex items-center gap-2 hover:text-brand-400 transition-colors">
               <CheckSquare size={16} /> Job Matcher
             </Link>
-            <Link to="/admin" className="flex items-center gap-2 hover:text-brand-400 transition-colors">
-              <ShieldCheck size={16} /> Security Logs
+            <Link to="/cover-letter" className="flex items-center gap-2 hover:text-brand-400 transition-colors">
+              <Sparkles size={16} className="text-purple-400" /> Cover Letter AI
             </Link>
           </div>
         )}
@@ -80,7 +80,7 @@ function App() {
             <Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
             <Route path="/resume/:id" element={<PrivateRoute><ResumeDetail /></PrivateRoute>} />
             <Route path="/job-match" element={<PrivateRoute><JobMatcher /></PrivateRoute>} />
-            <Route path="/admin" element={<PrivateRoute><AdminDashboard /></PrivateRoute>} />
+            <Route path="/cover-letter" element={<PrivateRoute><CoverLetterGenerator /></PrivateRoute>} />
             
             <Route path="*" element={<Navigate to="/" />} />
           </Routes>

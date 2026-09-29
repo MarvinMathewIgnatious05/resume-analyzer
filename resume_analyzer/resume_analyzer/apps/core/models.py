@@ -145,3 +145,21 @@ class Notification(models.Model):
 
     def __str__(self):
         return f"{self.title} for {self.user.email}"
+
+class CoverLetter(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='cover_letters')
+    resume_version = models.ForeignKey(ResumeVersion, on_delete=models.CASCADE, related_name='cover_letters', null=True, blank=True)
+    job_title = models.CharField(max_length=255, default="Software Engineer")
+    company = models.CharField(max_length=255, default="Target Company")
+    job_description = models.TextField(blank=True, default="")
+    tone = models.CharField(max_length=50, default="Professional")
+    content = models.TextField()
+    key_highlights = models.JSONField(default=list, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Cover Letter for {self.job_title} at {self.company}"
+

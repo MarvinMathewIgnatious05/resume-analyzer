@@ -1,6 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
-import { CheckSquare, ArrowUpRight, Sparkles, AlertCircle, XCircle, CheckCircle, RefreshCw } from 'lucide-react';
+import { CheckSquare, ArrowUpRight, Sparkles, AlertCircle, XCircle, CheckCircle, RefreshCw, Link as LinkIcon, Globe } from 'lucide-react';
 import axios from 'axios';
 
 interface Resume {
@@ -28,15 +27,48 @@ export default function JobMatcher() {
   const [resumes, setResumes] = useState<Resume[]>([]);
   const [selectedVersionId, setSelectedVersionId] = useState<string>('');
   
-  // Job Description
+  // Job Description & URL Scraper
   const [jobTitle, setJobTitle] = useState('');
   const [jobText, setJobText] = useState('');
+  const [jobUrl, setJobUrl] = useState('');
+  const [scraping, setScraping] = useState(false);
+  const [scrapeSuccess, setScrapeSuccess] = useState(false);
   
   // States
   const [loading, setLoading] = useState(false);
   const [fetchingResumes, setFetchingResumes] = useState(true);
   const [matchResult, setMatchResult] = useState<MatchResult | null>(null);
   const [error, setError] = useState('');
+
+  const handleScrapeUrl = async () => {
+    if (!jobUrl || !jobUrl.startsWith('http')) {
+      setError('Please enter a valid job listing URL starting with http:// or https://');
+      return;
+    }
+
+    setScraping(true);
+    setError('');
+    setScrapeSuccess(false);
+
+    const token = localStorage.getItem('access_token');
+    try {
+      const resp = await axios.post('http://localhost:8000/api/jobs/scrape/', {
+        url: jobUrl
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+
+      if (resp.data.job_title) setJobTitle(resp.data.job_title);
+      if (resp.data.raw_text) setJobText(resp.data.raw_text);
+      setScrapeSuccess(true);
+      setTimeout(() => setScrapeSuccess(false), 4000);
+    } catch (err: any) {
+      console.error('URL Scrape error:', err);
+      setError(err.response?.data?.detail || 'Failed to fetch job requirements from URL.');
+    } finally {
+      setScraping(false);
+    }
+  };
 
   useEffect(() => {
     const fetchResumes = async () => {
@@ -93,7 +125,7 @@ export default function JobMatcher() {
 
       // 3. Poll for Completion (simulate or wait for Celery completion)
       // Since it runs in Celery asynchronously, we poll the match detail endpoint.
-      pollMatchStatus(matchId, token);
+      pollMatchStatus(matchId, token || '');
 
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Matching analysis failed.');
@@ -155,6 +187,41 @@ export default function JobMatcher() {
           )}
 
           <form onSubmit={handleMatch} className="space-y-5">
+            {/* URL Auto-Scraper Card */}
+            <div className="p-4 bg-slate-900/80 border border-slate-800 rounded-xl space-y-3">
+              <label className="block text-xs font-semibold uppercase tracking-wider text-brand-400 flex items-center gap-1.5">
+                <Globe size={14} /> Auto-Import from Job URL
+              </label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-500">
+                    <LinkIcon size={14} />
+                  </div>
+                  <input
+                    type="url"
+                    placeholder="https://linkedin.com/jobs/view/... or Indeed / Glassdoor URL"
+                    value={jobUrl}
+                    onChange={(e) => setJobUrl(e.target.value)}
+                    className="w-full pl-9 pr-3 py-2 bg-slate-950 border border-slate-800 rounded-lg text-xs text-white outline-none focus:border-brand-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={handleScrapeUrl}
+                  disabled={scraping}
+                  className="px-3 py-2 bg-brand-600/20 border border-brand-500/40 hover:border-brand-500 text-brand-400 font-semibold text-xs rounded-lg transition-all disabled:opacity-50 shrink-0 flex items-center gap-1.5"
+                >
+                  {scraping ? <RefreshCw size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                  {scraping ? 'Fetching...' : 'Fetch'}
+                </button>
+              </div>
+              {scrapeSuccess && (
+                <p className="text-[11px] text-green-400 font-medium flex items-center gap-1">
+                  <CheckCircle size={12} /> Job title and requirements auto-extracted successfully!
+                </p>
+              )}
+            </div>
+
             <div>
               <label className="block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Select Resume Version</label>
               <select 

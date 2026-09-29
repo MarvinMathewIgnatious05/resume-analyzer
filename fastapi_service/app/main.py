@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 from app.services.nlp import NLPService
 from app.services.ollama_client import OllamaClient
+from app.services.scraper import JobScraper
 
 app = FastAPI(
     title="AI Resume Analyzer Microservice",
@@ -15,6 +16,15 @@ ollama_client = OllamaClient()
 # Request/Response Schemas
 class TextRequest(BaseModel):
     text: str
+
+class JobScrapeRequest(BaseModel):
+    url: str
+
+class JobScrapeResponse(BaseModel):
+    job_title: Optional[str] = "Target Job Posting"
+    company: Optional[str] = "Target Company"
+    raw_text: str
+    source_url: str
 
 class MatchRequest(BaseModel):
     resume_text: str
@@ -56,10 +66,53 @@ class FeedbackResponse(BaseModel):
     improvements: List[str]
     career_guidance: str
 
+class CoverLetterRequest(BaseModel):
+    resume_text: str
+    job_title: Optional[str] = "Software Engineer"
+    job_company: Optional[str] = "Target Company"
+    job_description: Optional[str] = ""
+    tone: Optional[str] = "Professional"
+
+class CoverLetterResponse(BaseModel):
+    cover_letter: str
+    key_highlights: List[str]
+    tone_used: str
+
 
 @app.get("/")
 async def root():
     return {"status": "AI Resume Analyzer service is running."}
+
+@app.post("/generate-cover-letter", response_model=CoverLetterResponse)
+async def generate_cover_letter_endpoint(request: CoverLetterRequest):
+    try:
+        res = ollama_client.generate_cover_letter(
+            resume_text=request.resume_text,
+            job_title=request.job_title or "Software Engineer",
+            job_company=request.job_company or "Target Company",
+            job_description=request.job_description or "",
+            tone=request.tone or "Professional"
+        )
+        return CoverLetterResponse(
+            cover_letter=res.get("cover_letter", ""),
+            key_highlights=res.get("key_highlights", []),
+            tone_used=res.get("tone_used", request.tone or "Professional")
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/scrape-job", response_model=JobScrapeResponse)
+async def scrape_job_endpoint(request: JobScrapeRequest):
+    try:
+        data = JobScraper.scrape(request.url)
+        return JobScrapeResponse(
+            job_title=data.get("job_title"),
+            company=data.get("company"),
+            raw_text=data.get("raw_text"),
+            source_url=data.get("source_url")
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/extract-skills", response_model=SkillExtractionResponse)
 async def extract_skills(request: TextRequest):

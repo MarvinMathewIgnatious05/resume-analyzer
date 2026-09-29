@@ -1,6 +1,15 @@
 import hashlib
 from rest_framework import serializers
-from .models import Resume, ResumeVersion, ResumeAnalysis, JobDescription, JobMatch, AuditLog, Notification
+from .models import Resume, ResumeVersion, ResumeAnalysis, JobDescription, JobMatch, AuditLog, Notification, CoverLetter
+
+class CoverLetterSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = CoverLetter
+        fields = [
+            'id', 'resume_version', 'job_title', 'company', 'job_description',
+            'tone', 'content', 'key_highlights', 'created_at'
+        ]
+        read_only_fields = ['id', 'created_at']
 
 class ResumeAnalysisSerializer(serializers.ModelSerializer):
     class Meta:

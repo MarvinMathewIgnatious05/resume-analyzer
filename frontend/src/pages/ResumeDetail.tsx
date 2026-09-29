@@ -1,10 +1,12 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { 
-  ArrowLeft, ShieldCheck, ShieldAlert, Sparkles, Award, FileText, 
-  MapPin, Phone, Mail, ThumbsUp, ThumbsDown, BookOpen, AlertCircle
+  ArrowLeft, ShieldCheck, ShieldAlert, Sparkles, FileText, 
+  Phone, Mail, ThumbsUp, ThumbsDown, BookOpen, AlertCircle, Trash2, Download
 } from 'lucide-react';
 import axios from 'axios';
+import html2pdf from 'html2pdf.js';
+import { ReportPdfTemplate } from '../components/ReportPdfTemplate';
 
 interface ResumeDetails {
   id: number;
@@ -45,6 +47,50 @@ export default function ResumeDetail() {
   const [resume, setResume] = useState<ResumeDetails | null>(null);
   const [selectedVersionId, setSelectedVersionId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+
+  const activeVersion = resume?.versions.find(v => v.id === selectedVersionId);
+  const analysis = activeVersion?.analysis;
+
+  const handleDownloadPdfReport = async () => {
+    const element = document.getElementById('pdf-report-container');
+    if (!element || !resume || !activeVersion || !analysis) return;
+
+    setDownloadingPdf(true);
+    try {
+      const opt = {
+        margin: [0.3, 0.3, 0.3, 0.3] as [number, number, number, number],
+        filename: `ATS_Report_${resume.title.replace(/\s+/g, '_')}_v${activeVersion.version_number}.pdf`,
+        image: { type: 'jpeg' as const, quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, logging: false },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' as const }
+      };
+      await html2pdf().set(opt).from(element).save();
+    } catch (err) {
+      console.error('PDF export error:', err);
+      alert('Failed to generate PDF report. Please try again.');
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
+
+  const handleDeleteResume = async () => {
+    if (!id) return;
+    const token = localStorage.getItem('access_token');
+    setDeleting(true);
+    try {
+      await axios.delete(`http://localhost:8000/api/resumes/${id}/`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      navigate('/');
+    } catch (err) {
+      console.error('Error deleting resume:', err);
+      alert('Failed to delete evaluation history item.');
+      setDeleting(false);
+    }
+  };
 
   const fetchResume = useCallback(async () => {
     const token = localStorage.getItem('access_token');
@@ -79,24 +125,21 @@ export default function ResumeDetail() {
                       version.analysis.status === 'PENDING' || 
                       version.analysis.status === 'PROCESSING';
 
-    if (isPending) {
-      const interval = setInterval(() => {
-        const token = localStorage.getItem('access_token');
-        axios.get(`http://localhost:8000/api/resumes/${id}/`, {
-          headers: { Authorization: `Bearer ${token}` }
-        }).then(resp => {
-          setResume(resp.data);
-        }).catch(err => {
-          console.error('Error polling resume details:', err);
-        });
-      }, 3000);
+    if (!isPending) return;
 
-      return () => clearInterval(interval);
-    }
+    const interval = setInterval(() => {
+      const token = localStorage.getItem('access_token');
+      axios.get(`http://localhost:8000/api/resumes/${id}/`, {
+        headers: { Authorization: `Bearer ${token}` }
+      }).then(resp => {
+        setResume(resp.data);
+      }).catch(err => {
+        console.error('Error polling resume details:', err);
+      });
+    }, 3000);
+
+    return () => clearInterval(interval);
   }, [resume, selectedVersionId, id]);
-
-  const activeVersion = resume?.versions.find(v => v.id === selectedVersionId);
-  const analysis = activeVersion?.analysis;
 
   if (loading) {
     return (
@@ -163,7 +206,7 @@ export default function ResumeDetail() {
           </div>
         </div>
 
-        {/* Version Selector */}
+        {/* Version Selector, PDF Download & Delete Action */}
         <div className="flex items-center gap-3">
           <span className="text-sm text-slate-400 font-medium">Evaluation Version:</span>
           <select 
@@ -177,6 +220,44 @@ export default function ResumeDetail() {
               </option>
             ))}
           </select>
+
+          {analysis?.status === 'COMPLETED' && (
+            <button
+              onClick={handleDownloadPdfReport}
+              disabled={downloadingPdf}
+              className="flex items-center gap-1.5 px-3 py-2 bg-brand-600 hover:bg-brand-500 active:bg-brand-700 disabled:opacity-50 text-white rounded-lg text-sm font-semibold transition-all shadow-md shadow-brand-600/20"
+              title="Download ATS Assessment PDF Report"
+            >
+              <Download size={16} className={downloadingPdf ? 'animate-bounce' : ''} /> 
+              {downloadingPdf ? 'Generating PDF...' : 'Download PDF Report'}
+            </button>
+          )}
+
+          {showDeleteConfirm ? (
+            <div className="flex items-center gap-2 border border-red-500/30 bg-red-500/10 p-1 rounded-lg">
+              <button
+                onClick={handleDeleteResume}
+                disabled={deleting}
+                className="px-3 py-1.5 bg-red-600 hover:bg-red-500 text-white text-xs font-semibold rounded-md transition-colors disabled:opacity-50"
+              >
+                {deleting ? 'Deleting...' : 'Confirm Delete'}
+              </button>
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-md transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowDeleteConfirm(true)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-900 border border-slate-800 hover:border-red-500/40 text-slate-400 hover:text-red-400 rounded-lg text-sm font-semibold transition-all"
+              title="Delete Evaluation Record"
+            >
+              <Trash2 size={16} /> Delete Record
+            </button>
+          )}
         </div>
       </div>
 
@@ -349,6 +430,19 @@ export default function ResumeDetail() {
               </p>
             </>
           )}
+        </div>
+      )}
+
+      {/* Hidden Container for PDF Export */}
+      {activeVersion && analysis && (
+        <div style={{ position: 'absolute', left: '-9999px', top: '-9999px' }}>
+          <ReportPdfTemplate
+            title={resume.title}
+            versionNumber={activeVersion.version_number}
+            fileName={activeVersion.file_name}
+            createdDate={activeVersion.created_at}
+            analysis={analysis}
+          />
         </div>
       )}
     </div>

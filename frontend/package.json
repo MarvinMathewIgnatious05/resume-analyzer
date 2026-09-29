@@ -13,6 +13,7 @@
     "@reduxjs/toolkit": "^2.2.1",
     "@tanstack/react-query": "^5.24.1",
     "axios": "^1.6.7",
+    "html2pdf.js": "^0.14.0",
     "lucide-react": "^0.344.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

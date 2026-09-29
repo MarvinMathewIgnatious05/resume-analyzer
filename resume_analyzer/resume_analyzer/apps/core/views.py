@@ -1,19 +1,26 @@
+import os
 import hashlib
+import requests
+from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.db.models import Avg, Count
 from django.utils import timezone
 from rest_framework import viewsets, permissions, status, views
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
-from .models import Resume, ResumeVersion, ResumeAnalysis, JobDescription, JobMatch, AuditLog, Notification
+from .models import Resume, ResumeVersion, ResumeAnalysis, JobDescription, JobMatch, AuditLog, Notification, CoverLetter
 from .serializers import (
     ResumeSerializer,
     ResumeVersionSerializer,
     JobDescriptionSerializer,
     JobMatchSerializer,
     AuditLogSerializer,
-    NotificationSerializer
+    NotificationSerializer,
+    CoverLetterSerializer
 )
-from .tasks import async_analyze_resume
+from .tasks import async_analyze_resume, extract_text_from_pdf, extract_text_from_docx
+
+User = get_user_model()
 
 class ResumeViewSet(viewsets.ModelViewSet):
     serializer_class = ResumeSerializer
@@ -22,6 +29,25 @@ class ResumeViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         return Resume.objects.filter(user=self.request.user)
+
+    def perform_destroy(self, instance):
+        # Clean up files associated with all versions of this resume
+        for version in instance.versions.all():
+            if version.file and os.path.exists(version.file.path):
+                try:
+                    os.remove(version.file.path)
+                except Exception:
+                    pass
+
+        # Create audit log for security & tracking
+        AuditLog.objects.create(
+            user=self.request.user,
+            event_type='ADMIN_ACTION',
+            description=f"Deleted evaluation history item: '{instance.title}' (ID: {instance.id})",
+            ip_address=self.request.META.get('REMOTE_ADDR'),
+            user_agent=self.request.META.get('HTTP_USER_AGENT')
+        )
+        instance.delete()
 
     def create(self, request, *args, **kwargs):
         file_obj = request.FILES.get('file')
@@ -285,3 +311,94 @@ class AdminMetricsView(views.APIView):
             },
             "recent_audit_logs": AuditLogSerializer(recent_logs, many=True).data
         })
+
+class CoverLetterViewSet(viewsets.ModelViewSet):
+    serializer_class = CoverLetterSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return CoverLetter.objects.filter(user=self.request.user)
+
+class CoverLetterGenerateView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        resume_version_id = request.data.get('resume_version_id')
+        job_title = request.data.get('job_title', 'Software Engineer')
+        company = request.data.get('company', 'Target Company')
+        job_description = request.data.get('job_description', '')
+        tone = request.data.get('tone', 'Professional')
+
+        if not resume_version_id:
+            return Response({"detail": "resume_version_id is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            version = ResumeVersion.objects.get(id=resume_version_id, resume__user=request.user)
+        except ResumeVersion.DoesNotExist:
+            return Response({"detail": "Resume version not found."}, status=status.HTTP_404_NOT_FOUND)
+
+        # Extract text from version file
+        file_path = version.file.path
+        resume_text = ""
+        try:
+            if file_path.endswith('.pdf'):
+                resume_text = extract_text_from_pdf(file_path)
+            elif file_path.endswith('.docx'):
+                resume_text = extract_text_from_docx(file_path)
+        except Exception as e:
+            return Response({"detail": f"Failed to extract resume text: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not resume_text:
+            return Response({"detail": "Resume file has no readable text content."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Call FastAPI AI Microservice
+        fastapi_url = getattr(settings, 'FASTAPI_SERVICE_URL', 'http://localhost:8080')
+        try:
+            ai_resp = requests.post(
+                f"{fastapi_url}/generate-cover-letter",
+                json={
+                    "resume_text": resume_text,
+                    "job_title": job_title,
+                    "job_company": company,
+                    "job_description": job_description,
+                    "tone": tone
+                },
+                timeout=45
+            )
+            ai_resp.raise_for_status()
+            ai_data = ai_resp.json()
+        except Exception as e:
+            return Response({"detail": f"AI Microservice failed to generate cover letter: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        # Save CoverLetter record for user
+        cover_letter = CoverLetter.objects.create(
+            user=request.user,
+            resume_version=version,
+            job_title=job_title,
+            company=company,
+            job_description=job_description,
+            tone=tone,
+            content=ai_data.get('cover_letter', ''),
+            key_highlights=ai_data.get('key_highlights', [])
+        )
+
+        serializer = CoverLetterSerializer(cover_letter)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+class JobScrapeView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        url = request.data.get('url', '').strip()
+        if not url or not (url.startswith('http://') or url.startswith('https://')):
+            return Response({"detail": "A valid job listing URL (starting with http:// or https://) is required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        fastapi_url = getattr(settings, 'FASTAPI_SERVICE_URL', 'http://localhost:8080')
+        try:
+            resp = requests.post(f"{fastapi_url}/scrape-job", json={"url": url}, timeout=25)
+            resp.raise_for_status()
+            return Response(resp.json(), status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"detail": f"Failed to scrape job listing from URL: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
+
+
